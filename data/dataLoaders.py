@@ -4,17 +4,18 @@ import torch
 import torchvision
 from torch.utils import data
 import math
+from config import YoloConfig
 
 categories = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
 
 
 class VOCDataset(data.Dataset):
-	def __init__(self, dataset, cellsPerAxes = 7, boxesPerCell = 2) -> None:
+	def __init__(self, dataset) -> None:
 		super().__init__()
 		self.dataset = dataset
-		self.cellsPerAxes = cellsPerAxes
-		self.boxesPerCell = boxesPerCell
-		self.cellPredictionSize = boxesPerCell * 5 + len(categories) # 5 is the x,y,h,w, predicted IoU
+		self.cellsPerAxis = YoloConfig.cellsPerAxis
+		self.boxesPerCell = YoloConfig.boxesPerCell
+		self.cellPredictionSize = self.boxesPerCell * 5 + len(categories) # 5 is the x,y,h,w, predicted IoU
 
 	
 	def __len__(self):
@@ -31,9 +32,9 @@ class VOCDataset(data.Dataset):
 		"""
 		img, label = self.dataset(index)
 		img = torchvision.transforms.functional.resize(img, (448, 448))
-		label = torch.zeros((self.cellsPerAxes, self.cellsPerAxes, self.cellPredictionSize))
+		label = torch.zeros((self.cellsPerAxis, self.cellsPerAxis, self.cellPredictionSize))
 		for obj in label['annotation']['object']:
-			xmin = obj['bndbox']['xmin']
+			xmin = obj['bndbox']['xmin'] #absolute coordinates
 			ymin = obj['bndbox']['ymin']
 			xmax = obj['bndbox']['xmax']
 			ymax = obj['bndbox']['ymax']
@@ -44,14 +45,19 @@ class VOCDataset(data.Dataset):
 			if xmin >= 1 or ymin >= 1 or xmax <= 0 or ymax <= 0:
 				continue
 			
-			xCenter = (xmin + xmax) / 2.0
+			xCenter = (xmin + xmax) / 2.0 # center of the bounding box
 			yCenter = (ymin + ymax) / 2.0
 
 			width = xmax - xmin
 			height = ymax - ymin
 
-			xidx = xCenter // self.cellsPerAxes
-			yidx = yCenter // self.cellsPerAxes
+			xidx = xCenter // self.cellsPerAxis
+			assert xidx.min() >= 0
+			assert xidx.max() < self.cellsPerAxis
+
+			yidx = yCenter // self.cellsPerAxis
+			assert xidx.min() >= 0
+			assert xidx.max() < self.cellsPerAxis
 
 			# According to the paper
 			# if multiple objects exist in the same cell
@@ -62,14 +68,15 @@ class VOCDataset(data.Dataset):
 				else: use_data = False
 			else: use_data = True
 
+			possibleOffsets = [x * 5 for x in range(self.boxesPerCell)]
 			if use_data:
-				for offset in [0, 5]:
+				for offset in possibleOffsets:
 					# Transforming image relative coordinates to cell relative coordinates:
 					# x - idx / 7.0 = x_cell / cell_count (7.0)
 					# => x_cell = x * cell_count - idx = x * 7.0 - idx
 					# y is the same
-					label[yidx][xidx][0 + offset] = xCenter * self.cellsPerAxes - xidx
-					label[yidx][xidx][1 + offset] = yCenter * self.cellsPerAxes - yidx
+					label[yidx][xidx][0 + offset] = xCenter * self.cellsPerAxis - xidx
+					label[yidx][xidx][1 + offset] = yCenter * self.cellsPerAxis - yidx
 					label[yidx][xidx][2 + offset] = width
 					label[yidx][xidx][3 + offset] = height
 					label[yidx][xidx][4 + offset] = 1 #target predicted IoU will be 1 since every boxes IoU with itself is 1.
@@ -90,6 +97,7 @@ def load_data_voc(batch_size, download=False, test_shuffle=True, trans = None):
 	# Load the dataset
 	if trans == None:
 		trans = [
+			torchvision.transforms.Resize(448,448),
 			torchvision.transforms.ToTensor(),
 		]
 	trans = torchvision.transforms.Compose(trans)

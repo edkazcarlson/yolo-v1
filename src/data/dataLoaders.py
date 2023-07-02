@@ -1,20 +1,24 @@
 # https://github.com/JeffersonQin/yolo-v1-pytorch
+import sys
+
+sys.path.append('..')
+from config import YoloConfig
 
 import torch
 import torchvision
 from torch.utils import data
 import math
-from config import YoloConfig
+from targetTransform import defaultTargetTransform
 
 categories = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
 
 
 class VOCDataset(data.Dataset):
-	def __init__(self, dataset) -> None:
+	def __init__(self, dataset, config: YoloConfig) -> None:
 		super().__init__()
 		self.dataset = dataset
-		self.cellsPerAxis = YoloConfig.cellsPerAxis
-		self.boxesPerCell = YoloConfig.boxesPerCell
+		self.cellsPerAxis = config.cellsPerAxis
+		self.boxesPerCell = config.boxesPerCell
 		self.cellPredictionSize = self.boxesPerCell * 5 + len(categories) # 5 is the x,y,h,w, predicted IoU
 
 	
@@ -30,19 +34,24 @@ class VOCDataset(data.Dataset):
 		The coordinates are relative to the cell 
 		The canonical cellsPerAxes = 7 cellPredictionSize = 30 (2 boxes of 5 predictions + 20 long one hot prediction for class)
 		"""
-		img, label = self.dataset(index)
-		img = torchvision.transforms.functional.resize(img, (448, 448))
-		label = torch.zeros((self.cellsPerAxis, self.cellsPerAxis, self.cellPredictionSize))
+		img, label = self.dataset.__getitem__(index)
+		imgWidth = int(label['annotation']['size']['width'])
+		cellWidth = imgWidth / self.cellsPerAxis
+		imgHeight = int(label['annotation']['size']['height'])
+		cellHeight = imgHeight / self.cellsPerAxis
+
+		outputLabel = torch.zeros((self.cellsPerAxis, self.cellsPerAxis, self.cellPredictionSize))
+		print(f'found {len(label["annotation"]["object"])} objects')
 		for obj in label['annotation']['object']:
-			xmin = obj['bndbox']['xmin'] #absolute coordinates
-			ymin = obj['bndbox']['ymin']
-			xmax = obj['bndbox']['xmax']
-			ymax = obj['bndbox']['ymax']
+			xmin = float(obj['bndbox']['xmin']) #absolute coordinates
+			ymin = float(obj['bndbox']['ymin'])
+			xmax = float(obj['bndbox']['xmax'])
+			ymax = float(obj['bndbox']['ymax'])
 			name = obj['name']
 
+			print(obj['bndbox'])
+
 			if xmin == xmax or ymin == ymax:
-				continue
-			if xmin >= 1 or ymin >= 1 or xmax <= 0 or ymax <= 0:
 				continue
 			
 			xCenter = (xmin + xmax) / 2.0 # center of the bounding box
@@ -51,19 +60,25 @@ class VOCDataset(data.Dataset):
 			width = xmax - xmin
 			height = ymax - ymin
 
-			xidx = xCenter // self.cellsPerAxis
-			assert xidx.min() >= 0
-			assert xidx.max() < self.cellsPerAxis
+			xidx = int(xCenter // cellWidth)
+			xPosInCell = (xCenter % cellWidth) / cellWidth
+			assert xidx >= 0
+			assert xidx < self.cellsPerAxis
+			assert xPosInCell >= 0 
+			assert xPosInCell <= 1 
 
-			yidx = yCenter // self.cellsPerAxis
-			assert xidx.min() >= 0
-			assert xidx.max() < self.cellsPerAxis
+			yidx = int(yCenter // cellWidth)
+			yPosInCell = (yCenter % cellHeight) / cellHeight
+			assert xidx >= 0
+			assert xidx < self.cellsPerAxis
+			assert yPosInCell >= 0 
+			assert yPosInCell <= 1 
 
 			# According to the paper
 			# if multiple objects exist in the same cell
 			# pick the one with the largest area
-			if label[yidx][xidx][4] == 1: # already have object
-				if label[yidx][xidx][2] * label[yidx][xidx][3] < width * height:
+			if outputLabel[yidx][xidx][4] == 1: # already have object
+				if outputLabel[yidx][xidx][2] * outputLabel[yidx][xidx][3] < width * height:
 					use_data = True
 				else: use_data = False
 			else: use_data = True
@@ -75,21 +90,21 @@ class VOCDataset(data.Dataset):
 					# x - idx / 7.0 = x_cell / cell_count (7.0)
 					# => x_cell = x * cell_count - idx = x * 7.0 - idx
 					# y is the same
-					label[yidx][xidx][0 + offset] = xCenter * self.cellsPerAxis - xidx
-					label[yidx][xidx][1 + offset] = yCenter * self.cellsPerAxis - yidx
-					label[yidx][xidx][2 + offset] = width
-					label[yidx][xidx][3 + offset] = height
-					label[yidx][xidx][4 + offset] = 1 #target predicted IoU will be 1 since every boxes IoU with itself is 1.
-				label[yidx][xidx][10 + categories.index(name)] = 1
+					outputLabel[yidx][xidx][0 + offset] = xPosInCell
+					outputLabel[yidx][xidx][1 + offset] = yPosInCell
+					outputLabel[yidx][xidx][2 + offset] = width
+					outputLabel[yidx][xidx][3 + offset] = height
+					outputLabel[yidx][xidx][4 + offset] = 1 #target predicted IoU will be 1 since every boxes IoU with itself is 1.
+				outputLabel[yidx][xidx][(5 * self.boxesPerCell) + categories.index(name)] = 1
 
-		return img, label
+		return img, outputLabel
 	
 
 # Sample output from an iteration of the VOCDetection Dataset
 # (<PIL.Image.Image image mode=RGB size=500x375 at 0x7FC05FFCBB20>, {'annotation': {'folder': 'VOC2007', 'filename': '000005.jpg', 'source': {'database': 'The VOC2007 Database', 'annotation': 'PASCAL VOC2007', 'image': 'flickr', 'flickrid': '325991873'}, 'owner': {'flickrid': 'archintent louisville', 'name': '?'}, 'size': {'width': '500', 'height': '375', 'depth': '3'}, 'segmented': '0', 'object': [{'name': 'chair', 'pose': 'Rear', 'truncated': '0', 'difficult': '0', 'bndbox': {'xmin': '263', 'ymin': '211', 'xmax': '324', 'ymax': '339'}}, {'name': 'chair', 'pose': 'Unspecified', 'truncated': '0', 'difficult': '0', 'bndbox': {'xmin': '165', 'ymin': '264', 'xmax': '253', 'ymax': '372'}}, {'name': 'chair', 'pose': 'Unspecified', 'truncated': '1', 'difficult': '1', 'bndbox': {'xmin': '5', 'ymin': '244', 'xmax': '67', 'ymax': '374'}}, {'name': 'chair', 'pose': 'Unspecified', 'truncated': '0', 'difficult': '0', 'bndbox': {'xmin': '241', 'ymin': '194', 'xmax': '295', 'ymax': '299'}}, {'name': 'chair', 'pose': 'Unspecified', 'truncated': '1', 'difficult': '1', 'bndbox': {'xmin': '277', 'ymin': '186', 'xmax': '312', 'ymax': '220'}}]}})
 
 
-def load_data_voc(batch_size, download=False, test_shuffle=True, trans = None):
+def load_data_voc(batch_size, download=False, test_shuffle=True, trans = None, targetTrans = None):
 	"""
 	Loads the Pascal VOC dataset.
 	:return: train_iter, test_iter, test_raw_iter
@@ -99,6 +114,10 @@ def load_data_voc(batch_size, download=False, test_shuffle=True, trans = None):
 		trans = [
 			torchvision.transforms.Resize(448,448),
 			torchvision.transforms.ToTensor(),
+		]
+	if targetTrans == None:
+		targetTrans = [
+			defaultTargetTransform(448, 448),
 		]
 	trans = torchvision.transforms.Compose(trans)
 	voc2007_trainval = torchvision.datasets.VOCDetection(root='../data/VOCDetection/', year='2007', image_set='trainval', download=download, transform=trans)
@@ -110,6 +129,6 @@ def load_data_voc(batch_size, download=False, test_shuffle=True, trans = None):
 			batch_size, shuffle=True), 
 		data.DataLoader(VOCDataset(voc2012_val, train=False), 
 			batch_size, shuffle=test_shuffle),
-		data.DataLoader(VOCRawTestDataset(voc2012_val), 
+		data.DataLoader(VOCDataset(voc2012_val), 
 			batch_size, shuffle=test_shuffle)
 	)

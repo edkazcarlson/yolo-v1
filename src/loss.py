@@ -21,8 +21,8 @@ def yolo_loss(yhat, y, config: YoloConfig):
 	with torch.no_grad():
 		# arrange cell xidx, yidx
 		# [7, 7]
-		cell_xidx = (torch.arange(cellsPerAxis**2) % cellsPerAxis).reshape(cellsPerAxis, cellsPerAxis)
-		cell_yidx = (torch.div(torch.arange(cellsPerAxis**2), cellsPerAxis, rounding_mode='floor')).reshape(cellsPerAxis, cellsPerAxis)
+		cell_xidx = torch.arange(cellsPerAxis**2).reshape(cellsPerAxis, cellsPerAxis)
+		cell_yidx = torch.arange(cellsPerAxis**2).reshape(cellsPerAxis, cellsPerAxis)
 		# transform to [7, 7, 2]
 		cell_xidx.unsqueeze_(-1)
 		cell_yidx.unsqueeze_(-1)
@@ -33,8 +33,10 @@ def yolo_loss(yhat, y, config: YoloConfig):
 		cell_yidx = cell_yidx.to(yhat.device)
 
 	def calc_coord(val):
+		"""
+		transform cell relative coordinates to image relative coordinates
+		"""
 		with torch.no_grad():
-			# transform cell relative coordinates to image relative coordinates
 			x = (val[..., 0] + cell_xidx) / cellsPerAxis
 			y = (val[..., 1] + cell_yidx) / cellsPerAxis
 
@@ -43,11 +45,11 @@ def yolo_loss(yhat, y, config: YoloConfig):
 				y - val[..., 3] / 2.0,
 				y + val[..., 3] / 2.0)
 
-	y_area = y[..., :10].reshape(-1, cellsPerAxis, cellsPerAxis, boxesPerCell, boxPredictionSize)
-	yhat_area = yhat[..., :10].reshape(-1, cellsPerAxis, cellsPerAxis, boxesPerCell, boxPredictionSize)
+	y_area = y[..., :boxPredictionSize * boxesPerCell].reshape(-1, cellsPerAxis, cellsPerAxis, boxesPerCell, boxPredictionSize)
+	yhat_area = yhat[..., :boxPredictionSize * boxesPerCell].reshape(-1, cellsPerAxis, cellsPerAxis, boxesPerCell, boxPredictionSize)
 
-	y_class = y[..., 10:].reshape(-1, cellsPerAxis, cellsPerAxis, 20)
-	yhat_class = yhat[..., 10:].reshape(-1, cellsPerAxis, cellsPerAxis, 20)
+	y_class = y[..., boxPredictionSize * boxesPerCell:].reshape(-1, cellsPerAxis, cellsPerAxis, config.categoriesCount)
+	yhat_class = yhat[..., boxPredictionSize * boxesPerCell:].reshape(-1, cellsPerAxis, cellsPerAxis, config.categoriesCount)
 
 	with torch.no_grad():
 		# calculate IoU

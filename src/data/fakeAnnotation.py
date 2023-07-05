@@ -1,4 +1,4 @@
-from dataLoaders import categories
+from dataLoaders import VOC_Detection_Categories
 
 def getBasicAnnotation():
     imageWidth = 448 * 2
@@ -16,7 +16,7 @@ def getBasicAnnotation():
     firstObject['bndbox']['xmax'] = '200'
     firstObject['bndbox']['ymin'] = '99'
     firstObject['bndbox']['ymax'] = '300'
-    firstObject['name'] = categories[0]
+    firstObject['name'] = VOC_Detection_Categories[0]
 
     secondObject = {}
     secondObject['bndbox'] = {}
@@ -24,7 +24,7 @@ def getBasicAnnotation():
     secondObject['bndbox']['xmax'] = '300'
     secondObject['bndbox']['ymin'] = '210'
     secondObject['bndbox']['ymax'] = '330'
-    secondObject['name'] = categories[1]
+    secondObject['name'] = VOC_Detection_Categories[1]
 
     target['annotation']['object'].append(firstObject)
     target['annotation']['object'].append(secondObject)

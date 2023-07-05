@@ -10,7 +10,7 @@ from torch.utils import data
 import math
 from targetTransform import defaultTargetTransform
 
-categories = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
+VOC_Detection_Categories = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
 
 
 class VOCDataset(data.Dataset):
@@ -19,7 +19,7 @@ class VOCDataset(data.Dataset):
 		self.dataset = dataset
 		self.cellsPerAxis = config.cellsPerAxis
 		self.boxesPerCell = config.boxesPerCell
-		self.cellPredictionSize = self.boxesPerCell * 5 + len(categories) # 5 is the x,y,h,w, predicted IoU
+		self.cellPredictionSize = self.boxesPerCell * 5 + len(VOC_Detection_Categories) # 5 is the x,y,h,w, predicted IoU
 
 	
 	def __len__(self):
@@ -95,7 +95,7 @@ class VOCDataset(data.Dataset):
 					outputLabel[yidx][xidx][2 + offset] = width
 					outputLabel[yidx][xidx][3 + offset] = height
 					outputLabel[yidx][xidx][4 + offset] = 1 #target predicted IoU will be 1 since every boxes IoU with itself is 1.
-				outputLabel[yidx][xidx][(5 * self.boxesPerCell) + categories.index(name)] = 1
+				outputLabel[yidx][xidx][(5 * self.boxesPerCell) + VOC_Detection_Categories.index(name)] = 1
 
 		return img, outputLabel
 	

@@ -126,7 +126,7 @@ class Yolo(nn.Module):
 			nn.Linear(4096, config.cellsPerAxis*config.cellsPerAxis*config.cellSize),
 			nn.Sigmoid(), #  normalize to [0, 1]
 			# [#, 7*7*30] => [#, 7, 7, 30]
-			nn.Unflatten(1, (config.cellsPerAxis*config.cellsPerAxis*config.cellSize))
+			nn.Unflatten(1, (config.cellsPerAxis, config.cellsPerAxis, config.cellSize))
 		)
 		self.net = nn.Sequential(self.backbone, self.head)
 

@@ -53,7 +53,7 @@ class YoloMetricsCalculator:
             classPercisions = []
             classRecalls = []
             for confidenceThreshold in samplingPoints:
-                percision, recall = calcPercisionRecall(self.model, self.data, classInd, confidenceThreshold)
+                percision, recall = self.calcPercisionRecall(self.model, self.data, classInd, confidenceThreshold)
                 classPercisions.append(percision)
                 classRecalls.append(recall)
             
@@ -78,24 +78,58 @@ class YoloMetricsCalculator:
         [(percision, recall for class 0), (percision, recall for class 1), etc]
         """
 
-        truePositives = [] 
-        falsePositives = []
-        trueNegatives = []
+        truePositives = []  # correctly labeled as a class
+        falsePositives = [] # incorrectly assigned something to a class (model saw something where there was nothing)
+        falseNegatives = [] # missed a bounding box that it should have (there was a cow in the picture, we didn't predict a box with label of cow that overlapped.)
+
         for _ in range(self.config.categories):
             truePositives.append(0)
             falsePositives.append(0)
-            trueNegatives.append(0)
+            falseNegatives.append(0)
 
         with torch.no_grad():
             for images, labels in self.data:
-                output = self.model(images)
-                output = output.reshape(-1, self.config.cellSize)#per cell
-                cellClass = output[:,self.config.categoriesStartInd:] #just the class predictions of the cell
-                boundingBoxPredictions = output[:,:self.config.categoriesStartInd] #just the bounding box coord predictions 
+                outputBatch = self.model(images)
+                for label, output in zip(labels, outputBatch):# per image
+                    outputBoxes = self.NonMaxSuppression(output)
+
+                    # at this point all the boxes are above the confidence threshold and have gone through non mas suppression.
+                    for classIdx in range(self.config.categoriesCount):
+                        # for GT bounding box in this image of this class
+                            # see if there's any prediction outputs where the IoU > threshold
+                                # if there's 0, increment 1 to the FN
+                                # if there's more than 1, add 1 to the TP and "assign" it to that bounding box. Make it so we can't assign this output bounding box to another GT.
+                                # if there's 1+, add the best to the TP and keep the ones that didnt get assigned.
+                        # at the end, any un-assigned bounding boxes are false positives and increment the counter.
+
+        prOutput = []
+        for tp, fp, fn in zip(truePositives, falsePositives, falseNegatives):
+            percision = tp / (tp + fp) # of the times I guessed something was positive, how often was I correct?
+            recall = tp / (tp + fn) # of the positives, how often was I able to find them.
+            prOutput.append((percision, recall))
+
+        return prOutput
                 
-                for cellIndex in range(cellClass):
-                    self.cellToBoundingBox
-                #calculate the predictions > threshold
+
+    def NonMaxSuppression(self, output):
+        """
+        Returns a list of [x,y,h,w,IoU,classNum] prediction boxes for a single model prediction that has been filtered for NMS"""
+        output = output.reshape(-1, self.config.cellSize)#per cell
+        cellClass = output[:,self.config.categoriesStartInd:] #just the class predictions of the cell
+        boundingBoxPredictions = output[:,:self.config.categoriesStartInd] #just the bounding box coord predictions 
+        
+        classBoundingBoxes = []
+        for cellIndex in range(cellClass):
+            #get the bounding boxes per class, add to classBoundingBoxes
+            pass
+        for classIdx in range(len(classBoundingBoxes)):
+            boundingBoxes = classBoundingBoxes[classIdx]
+            for boxIdx in range(len(boundingBoxes)):
+                for otherBoxIdx in range(boxIdx, len(boundingBoxes)):
+                    #calculate IoU, if above, mark to throw out
+
+        return listOfBoundingBoxes
+
 
     def cellToBoundingBox(self, cellClass: int, cellBoxes: torch.tensor, confidenceThreshold: float):
         """

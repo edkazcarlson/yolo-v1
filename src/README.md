@@ -11,3 +11,8 @@ format of a cell is
 4        IoU (target is 1 since Iou(x, x) = 1))
 
 to run all tests in dir py -m unittest discover
+
+
+
+todo:
+- reorg metrics to be a class to stop passing around the config and the other things like the sampling points.

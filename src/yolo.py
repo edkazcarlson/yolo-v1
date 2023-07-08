@@ -3,6 +3,7 @@
 import torch
 import torchvision
 import torch.nn as nn
+from config import YoloConfig
 
 class YoloBackbone(nn.Module):
 	def __init__(self):
@@ -95,7 +96,7 @@ class YoloBackbone(nn.Module):
 		return self.net(X)
 
 class Yolo(nn.Module):
-	def __init__(self, backbone: YoloBackbone, backbone_out_channels=1024):
+	def __init__(self, backbone: YoloBackbone, config: YoloConfig, backbone_out_channels=1024):
 		super(Yolo, self).__init__()
 		self.backbone = backbone
 		self.head = nn.Sequential(
@@ -122,10 +123,10 @@ class Yolo(nn.Module):
 			# nn.Dropout(0.5),
 			nn.LeakyReLU(0.1, inplace=True),
 			# [#, 4096] => [#, 7*7*30]
-			nn.Linear(4096, 7*7*30),
+			nn.Linear(4096, config.cellsPerAxis*config.cellsPerAxis*config.cellSize),
 			nn.Sigmoid(), #  normalize to [0, 1]
 			# [#, 7*7*30] => [#, 7, 7, 30]
-			nn.Unflatten(1, (7, 7, 30))
+			nn.Unflatten(1, (config.cellsPerAxis*config.cellsPerAxis*config.cellSize))
 		)
 		self.net = nn.Sequential(self.backbone, self.head)
 

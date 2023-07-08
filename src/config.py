@@ -6,3 +6,7 @@ class YoloConfig:
         self.boxesPerCell = boxesPerCell
         self.categoriesCount = categoriesCount
         self.categories = categories
+        self.cellSize = boxesPerCell * 5 + categoriesCount
+        self.categoriesStartInd = boxesPerCell * 5
+
+        self.indexOfIoU = 4

@@ -1,4 +1,4 @@
-from data.dataLoaders import VOC_Detection_Categories
+VOC_Detection_Categories = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
 
 class YoloConfig:
     def __init__(self, cellsPerAxis = 7,  boxesPerCell = 2, categoriesCount = 20, categories = VOC_Detection_Categories):

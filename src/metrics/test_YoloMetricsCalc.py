@@ -33,15 +33,34 @@ class TestMetricCalc(unittest.TestCase):
         box1[1] = .5 # corner is in center of cell
         box1[2] = 10
         box1[3] = 10
+        box1[4] = 1 #confidence
 
-        box1[0] = .5 # corner is in center of cell
-        box1[1] = .5 # corner is in center of cell
-        box1[2] = 10
-        box1[3] = 10
-        
-        calc.outputToBoundingBoxes()
+        box2[0] = .5 # corner is in center of cell
+        box2[1] = .5 # corner is in center of cell
+        box2[2] = 20
+        box2[3] = 20
+        box2[4] = .1
 
+        singleCell = torch.cat((box1, box2, classOneHot))
+
+        singleOutput = torch.zeros(7*7*30)
+        singleOutput = singleOutput.reshape(7,7,30)
+        singleOutput[0,0] = singleCell
+
+        boundingBoxes = calc.outputToBoundingBoxes(singleOutput)
+
+        filteredBoxes = []
+        for box in boundingBoxes:
+            if box[4] > 0:
+                filteredBoxes.append(box) 
+
+        self.assertEqual(len(filteredBoxes), 2)
+        self.assertEqual(filteredBoxes[0][0] , (448 // 7) * .5)# pixel x
+        self.assertEqual(filteredBoxes[0][1] , (448 // 7) * .5)# pixel y
+        self.assertEqual(filteredBoxes[0][2] , 10)# pixel width
+        self.assertEqual(filteredBoxes[0][3] , 10)# pixel height
+        self.assertEqual(filteredBoxes[0][4] , 1)# confidence
+        self.assertEqual(filteredBoxes[0][5] , 10)# class ind
 
 if __name__ == '__main__':
-    test = TestMetricCalc()
-    test.test_targetTransform()
+    unittest.main()

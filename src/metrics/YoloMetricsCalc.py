@@ -4,111 +4,99 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision
 from IOU import IoU
+from PR import PR
 
 sys.path.append('..')
 from config import YoloConfig
 
 
 class YoloMetricsCalculator:
-    def __init__(self, yoloModel, testData, config: YoloConfig):
+    def __init__(self, yoloModel, testData, config: YoloConfig, samplingPoints = [.1 * x for x in range(1,10)]):
         self.config = config
         self.model = yoloModel
         self.data = testData
         self.nmsIoUThreshold = .5
+        self.samplingPoints = samplingPoints
 
     def retrieveMetrics(self):
         # Calculate mAP
         mAP, prs = mAP()
 
         print(f'mAP is: {mAP}')
-        # render and save percision recall curves
-        for classIdx, pr in enumerate(prs):
+        # render and save precision recall curves
+        for classIdx in range(len(prs)):
             className = self.config.categories[classIdx]
-            percision = pr[0]
-            recall = pr[1]
-            percision, recall = zip(*sorted(zip(percision, recall))) # https://stackoverflow.com/questions/29876580/how-to-sort-a-list-according-to-another-list-python
-            percision.insert(0, 1) # if we have our threshold too high, our percision = 1 since everything we say is class x is class x and recall = 0 because we guess nothing. Done just to better fit graph
-            recall.insert(0, 0)
+            classPrecsisions = [x.precision for x in prs[classIdx]]
+            classRecalls = [x.recalls for x in prs[classIdx]]
 
-            plt.plot(recall, percision)
+            classPrecsisions, classRecalls = zip(*sorted(zip(classPrecsisions, classRecalls))) # https://stackoverflow.com/questions/29876580/how-to-sort-a-list-according-to-another-list-python
+            classPrecsisions.insert(0, 1) # if we have our threshold too high, our precision = 1 since everything we say is class x is class x and recall = 0 because we guess nothing. Done just to better fit graph
+            classRecalls.insert(0, 0)
+
+            plt.plot(classRecalls, classPrecsisions)
             plt.title(f'PR curve for {className}')
             plt.xlabel('Recall')
-            plt.ylabel('Percision')
+            plt.ylabel('precision')
             plt.imsave()
 
-    # mean average percision
-    def mAP(self, samplingPoints = [.1 * x for x in range(1,10)]):
+    # mean average precision
+    def mAP(self):
         """
-        Calculates the mean average percision 
+        Calculates the mean average precision 
         
         Returns:
-        Mean average percision
-        array of (percisionList, recallList) for each class 
+        Mean average precision
+        {class index -> [pr object at first confidence interval, pr object and 2nd...]}
         """
         apList = []
-
-        percisionRecalls = []
         
-        for classInd in range(self.config.categoriesCount):
-            classPercisions = []
-            classRecalls = []
-            for confidenceThreshold in samplingPoints:
-                percision, recall = self.calcPercisionRecall(self.model, self.data, classInd, confidenceThreshold)
-                classPercisions.append(percision)
-                classRecalls.append(recall)
-            
-            avgClassPercision = np.mean(np.aray(classPercisions))
-            apList.append(avgClassPercision)
+        prs = self.calcPrecisionRecall()
+        
+        for classIdx in range(self.config.categoriesCount):
+            classPrs = prs[classIdx]
+            avgClassprecision = sum([x.precision for x in classPrs])
+        apList.append(avgClassprecision)
 
-            percisionRecalls.append((classPercisions, classRecalls))
 
         apList = (apList)
         mAP = np.mean(np.array(apList))
 
-        return mAP, percisionRecalls
+        return mAP, prs
 
-    def calcPercisionRecall(self, confidenceThreshold: float):
+    def calcPrecisionRecall(self):
         """
 
-        For a confidence threshold, calculate the percision and recall performance across all classes
+        For a confidence threshold, calculate the precision and recall performance across all classes
         If the boxes IoU > confidenceThreshold, it is considered a positive prediction
         If 2 boxes with the same class prediction have an IoU > nmsIoUThreshold then the lower is removed.
 
         Output is in the shape
-        [(percision, recall for class 0), (percision, recall for class 1), etc]
+        {class index -> [pr object at first confidence interval, pr object and 2nd...]}
         """
 
-        truePositives = []  # correctly labeled as a class
-        falsePositives = [] # incorrectly assigned something to a class (model saw something where there was nothing)
-        falseNegatives = [] # missed a bounding box that it should have (there was a cow in the picture, we didn't predict a box with label of cow that overlapped.)
-
-        for _ in range(self.config.categories):
-            truePositives.append(0)
-            falsePositives.append(0)
-            falseNegatives.append(0)
+        prOutput = {}
 
         with torch.no_grad():
             for images, labels in self.data:
                 outputBatch = self.model(images)
-                for label, output in zip(labels, outputBatch):# per image
-                    nmsBoxes = self.NonMaxSuppression(output)
-                    # we need to filter these based on the Precision confidence threshold
+                for label, modelOutput in zip(labels, outputBatch):# per image
+                    nmsBoxes = self.NonMaxSuppression(modelOutput)
+                    for confidenceThreshold in self.samplingPoints:
+                        # filter based on the confidence threshold
 
-                    # at this point all the boxes are above the confidence threshold and have gone through non mas suppression.
-                    for classIdx in range(self.config.categoriesCount):
-                        # for GT bounding box in this image of this class
-                            # see if there's any prediction outputs where the IoU > threshold
-                                # if there's 0, increment 1 to the FN
-                                # if there's more than 1, add 1 to the TP and "assign" it to that bounding box. Make it so we can't assign this output bounding box to another GT.
-                                # if there's 1+, add the best to the TP and keep the ones that didnt get assigned.
-                        # at the end, any un-assigned bounding boxes are false positives and increment the counter.
+                        # at this point all the boxes are above the confidence threshold and have gone through non max suppression.
+                        for classIdx in range(self.config.categoriesCount):
+                            TP = 0
+                            FP = 0
+                            FN = 0
+                            # for each GT bounding box in this image of this class
+                                # see if there's any pairs of prediction and GT boxes where IoU > threshold
+                                    # if there's 0, increment 1 to the FN
+                                    # if there's more than 1, add 1 to the TP and "assign" it to that bounding box. Make it so we can't assign this output bounding box to another GT.
+                                    # if there's 1+, add the best to the TP and keep the ones that didnt get assigned.
+                            # at the end, any un-assigned bounding boxes are false positives and increment the counter.
 
-        prOutput = []
-        for tp, fp, fn in zip(truePositives, falsePositives, falseNegatives):
-            percision = tp / (tp + fp) # of the times I guessed something was positive, how often was I correct?
-            recall = tp / (tp + fn) # of the positives, how often was I able to find them.
-            prOutput.append((percision, recall))
-
+                            prOutput[classIdx].append(PR(TP, FP, FN))
         return prOutput
                 
 
@@ -117,7 +105,7 @@ class YoloMetricsCalculator:
         Input: The tensor output from the model for 1 image. 
         Returns a list of [x,y,h,w,IoU,classNum] prediction boxes for a single model prediction that has been filtered for NMS
         """
-        modelOutput = modelOutput.reshape(-1, self.config.cellSize)#per cell
+        modelOutput = modelOutput.reshape(-1, self.config.cellTensorSize)#per cell
         # cellClass = modelOutput[:,self.config.categoriesStartInd:] #just the class predictions of the cell
         # boundingBoxPredictions = modelOutput[:,:self.config.categoriesStartInd] #just the bounding box coord predictions 
         
@@ -159,19 +147,29 @@ class YoloMetricsCalculator:
         return nmsFilteredList
 
 
-    def outputToBoundingBoxes(self, cell: torch.tensor):
+    def outputToBoundingBoxes(self, modelOutput: torch.tensor):
         """
         Transforms a tensor representing a prediction for a single image (7,7,30)
         into a list of [x,y,h,w,IoU,classNum]
         """
         output = []
-        cellClass = cell[self.config.categoriesStartInd:] #just the class predictions of the cell
-        cellClass = torch.argmax(cellClass)
+        modelOutput = modelOutput.reshape((self.config.cellsPerAxis, self.config.cellsPerAxis, self.config.cellTensorSize))
+        for cellAxisHeightInd in range(modelOutput.shape[0]):
+            for cellAxisWidthInd in range(modelOutput.shape[1]):
+                cell = modelOutput[cellAxisHeightInd, cellAxisWidthInd]
+                cellClass = cell[self.config.categoriesStartInd:] #just the class predictions of the cell
+                cellClass = torch.argmax(cellClass).item()
 
-        boxes = cell[:self.config.categoriesStartInd]
-        boxes = boxes.reshape(self.config.boxesPerCell, 5)
-        for box in cell:
-            box = box.tolist()
-            box.append(cellClass)
-            output.append(cellClass)
+                boxes = cell[:self.config.categoriesStartInd]
+                boxes = boxes.reshape(self.config.boxesPerCell, 5)
+                for box in boxes:
+                    box = box.tolist()
+                    box[0] *= self.config.cellPixelLength #
+                    box[0] += self.config.cellPixelLength * cellAxisHeightInd
+
+                    box[1] *= self.config.cellPixelLength #
+                    box[1] += self.config.cellPixelLength * cellAxisWidthInd
+
+                    box.append(cellClass)
+                    output.append(box)
         return output

@@ -123,10 +123,9 @@ class Yolo(nn.Module):
 			# nn.Dropout(0.5),
 			nn.LeakyReLU(0.1, inplace=True),
 			# [#, 4096] => [#, 7*7*30]
-			nn.Linear(4096, config.cellsPerAxis*config.cellsPerAxis*config.cellSize),
-			nn.Sigmoid(), #  normalize to [0, 1]
+			nn.Linear(4096, config.cellsPerAxis*config.cellsPerAxis*config.cellTensorSize),
 			# [#, 7*7*30] => [#, 7, 7, 30]
-			nn.Unflatten(1, (config.cellsPerAxis, config.cellsPerAxis, config.cellSize))
+			nn.Unflatten(1, (config.cellsPerAxis, config.cellsPerAxis, config.cellTensorSize))
 		)
 		self.net = nn.Sequential(self.backbone, self.head)
 

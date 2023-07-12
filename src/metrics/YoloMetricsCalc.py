@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torchvision
-
+from IOU import IoU
 
 sys.path.append('..')
 from config import YoloConfig
@@ -91,7 +91,8 @@ class YoloMetricsCalculator:
             for images, labels in self.data:
                 outputBatch = self.model(images)
                 for label, output in zip(labels, outputBatch):# per image
-                    outputBoxes = self.NonMaxSuppression(output)
+                    nmsBoxes = self.NonMaxSuppression(output)
+                    # we need to filter these based on the Precision confidence threshold
 
                     # at this point all the boxes are above the confidence threshold and have gone through non mas suppression.
                     for classIdx in range(self.config.categoriesCount):
@@ -111,35 +112,66 @@ class YoloMetricsCalculator:
         return prOutput
                 
 
-    def NonMaxSuppression(self, output):
+    def NonMaxSuppression(self, modelOutput):
         """
-        Returns a list of [x,y,h,w,IoU,classNum] prediction boxes for a single model prediction that has been filtered for NMS"""
-        output = output.reshape(-1, self.config.cellSize)#per cell
-        cellClass = output[:,self.config.categoriesStartInd:] #just the class predictions of the cell
-        boundingBoxPredictions = output[:,:self.config.categoriesStartInd] #just the bounding box coord predictions 
+        Input: The tensor output from the model for 1 image. 
+        Returns a list of [x,y,h,w,IoU,classNum] prediction boxes for a single model prediction that has been filtered for NMS
+        """
+        modelOutput = modelOutput.reshape(-1, self.config.cellSize)#per cell
+        # cellClass = modelOutput[:,self.config.categoriesStartInd:] #just the class predictions of the cell
+        # boundingBoxPredictions = modelOutput[:,:self.config.categoriesStartInd] #just the bounding box coord predictions 
         
-        classBoundingBoxes = []
-        for cellIndex in range(cellClass):
-            #get the bounding boxes per class, add to classBoundingBoxes
-            pass
-        for classIdx in range(len(classBoundingBoxes)):
-            boundingBoxes = classBoundingBoxes[classIdx]
-            for boxIdx in range(len(boundingBoxes)):
-                for otherBoxIdx in range(boxIdx, len(boundingBoxes)):
+        classToBoxes = {} # class index -> list of bounding boxes
+
+        boundingBoxes = self.outputToBoundingBoxes(modelOutput)
+
+        for box in boundingBoxes:
+            classInd = box[5]
+            if classInd not in classToBoxes:
+                classToBoxes[classInd] = []
+            classToBoxes[classInd].append(box)
+
+        nmsFilteredList = []
+
+
+        for classInd in classToBoxes:
+            boundingBoxes = classToBoxes[classInd]
+            indicesToRemove = set()
+            for firstBoxIdx in range(len(boundingBoxes)):
+                firstBox = boundingBoxes[firstBoxIdx]
+                for secondBoxIdx in range(firstBoxIdx, len(boundingBoxes)):
+                    secondBox = boundingBoxes[secondBoxIdx]
+
                     #calculate IoU, if above, mark to throw out
+                    iou = IoU(firstBox, secondBox)
+                    if iou > self.nmsIoUThreshold: # there is too much overlap, decide which to mark to remove from processing
+                        firstBoxConfidence = firstBox[4]
+                        secondBoxConfidence = secondBox[4]
+                        if firstBoxConfidence > secondBoxConfidence:
+                            indicesToRemove.add(secondBoxIdx)
+                        else:
+                            indicesToRemove.add(firstBoxIdx)
+            
+            for boxIdx in range(len(boundingBoxes)):
+                if boxIdx not in indicesToRemove:
+                    nmsFilteredList.append(boundingBoxes[boxIdx])
 
-        return listOfBoundingBoxes
+        return nmsFilteredList
 
 
-    def cellToBoundingBox(self, cellClass: int, cellBoxes: torch.tensor, confidenceThreshold: float):
+    def outputToBoundingBoxes(self, cell: torch.tensor):
         """
-        Transforms a self.config.categoriesStartInd sized tensor representing the x bounding boxes and the class prediction 
-        into a list of [x,y,h,w,IoU,classNum]"""
+        Transforms a tensor representing a prediction for a single image (7,7,30)
+        into a list of [x,y,h,w,IoU,classNum]
+        """
         output = []
-        cellBoxes = cellBoxes.reshape(self.config.boxesPerCell, 5)
-        for box in cellBoxes:
-            if cellBoxes[self.config.indexOfIoU] > confidenceThreshold:
-                box = box.tolist()
-                box.append(cellClass)
-                output.append(cellClass)
+        cellClass = cell[self.config.categoriesStartInd:] #just the class predictions of the cell
+        cellClass = torch.argmax(cellClass)
+
+        boxes = cell[:self.config.categoriesStartInd]
+        boxes = boxes.reshape(self.config.boxesPerCell, 5)
+        for box in cell:
+            box = box.tolist()
+            box.append(cellClass)
+            output.append(cellClass)
         return output
